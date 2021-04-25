@@ -28,9 +28,17 @@
 
 
 const int N = 1.0e4; //Number of points. //Do not use more than 0.5e4 on old computers!
+constexpr double dz = 1.0 / N;
 
-const double R = 1;
+
+const double R_source = 20;
+const int R_sarcophagus = 30;
 const double pi = 3.14159265359;
+
+const double h_Pb = 5;
+const double h_Al = 8;
+const std::string down_cyl_matter = "Pb"; //Define down environment;
+
 
 double E_min = 1.0e5;
 const double E_0 = 2.0e6;
@@ -75,7 +83,7 @@ std::array<std::vector<coord>, N> interactions (std::vector<coord>& points);
 double cos_t (coord& A, coord& B, coord& C);
 
 
-void plot(std::array<std::vector<coord>, N>& points);
+void plot(std::array<std::vector<coord>, N>& points, double R);
 
 std::vector<longDoubleTuple> database_read (std::string name);
 
@@ -91,11 +99,10 @@ std::vector<std::tuple<double, double, double>> sigmas_air, sigmas_Al, sigmas_Pb
 
 std::tuple<double, double, double> interpolation_for_single_particle (int& group, double& E,
                                                                       std::vector<std::tuple<double, double, double>>& sigmas);
-const double h = 0.5;
 
-std::vector<coord> detectors = {std::make_tuple(0, 0, 0.25*h),
-                                std::make_tuple(0, 0, 0.5*h),
-                                std::make_tuple(0, 0, 1.5*h)};
+std::vector<coord> detectors = {std::make_tuple(0, 0, 0.25),
+                                std::make_tuple(0, 0, 0.5),
+                                std::make_tuple(0, 0, 1.5)};
 
 const int detectors_number = detectors.size();
 
@@ -130,6 +137,12 @@ std::vector <coord> coordinate_transformation (std::vector<coord>& coords);
 std::random_device rd;  //Will be used to obtain a seed for the random number engine
 std::mt19937 gen(rd()); //Standard mersenne_twister_engine seeded with rd()
 
+const std::vector<double> detectors_distance = {-R_sarcophagus, 0, 0.5*R_sarcophagus, R_sarcophagus};
+
+std::vector<std::vector<coord>> detectors_coordinates;
+
+std::vector<coord> detectors_generation (double r);
+
 int main() {
 
     std::cout << "Databases collecting...\t";
@@ -156,6 +169,11 @@ int main() {
 
     std::cout << "Computing..." << std::endl;
 
+    //Detectors generate
+    for (int i = 0; i < detectors_distance.size(); i++) {
+        std::vector<coord> detectors_family= std::move(detectors_generation(detectors_distance[i]));
+        detectors_coordinates.emplace_back(detectors_family);
+    }
     std::vector<coord> borning = std::move(polar());
     std::vector<coord> born_points = std::move(coordinate_transformation(borning));
     std::string name = "Distribution of " + std::to_string(N) + " points";
@@ -181,31 +199,39 @@ int main() {
     std::cout << "Plotting...\t";
 
     default_distribution_plot(name, name, "x", "y", name);
-    interpolation_plot("air", borders_of_groups, sigmas_air);
-    interpolation_plot("Al", borders_of_groups, sigmas_air);
     data_file_creation("detectors", detectors);
     for (int i = 0; i < detectors_number; i++) {
         double x, y, z;
         coordinates_from_tuple(x,y, z, detectors[i]);
         std::string title = "Detector inside the ";
-        title += (z <= h) ? "air" : "Al";
+        title += (z <= 0.5) ? "air" : "Al";
         detector_statistics_plot(names[i], title);
         detector_plot(names[i] + "_density", "Density flow through the " + title);
     }
-    plot(interaction_points);
+    plot(interaction_points, R_sarcophagus);
 
     std::cout << "Done!" << std::endl;
 
     return 0;
 }
 
+
+
+std::vector<coord> detectors_generation (double r) {
+    std::vector<coord> detector_coordinate (N);
+    double z = 0;
+    std::generate(detector_coordinate.begin(), detector_coordinate.end(), [&] {return std::make_tuple(r, 0, z += dz);});
+    return detector_coordinate;
+}
+
+
 //Function returns random points generated in polar coordinate system.
-std::vector<coord> polar () {
+std::vector<coord> polar () { //source
     std::vector <coord> coordinates;
     std::uniform_real_distribution<> dis(0.0, 1.0);
     for (int i = 0; i < N; i++) {
-        double rho = R * std::sqrt(dis(gen));
-        double phi = pi * dis(gen);
+        double rho = R_source * std::sqrt(dis(gen));
+        double phi = 2.0 * pi * dis(gen);
         double z = 0;
         coordinates.emplace_back(std::move(std::make_tuple(phi, rho, z)));
     }
@@ -218,7 +244,7 @@ std::vector<coord> coordinate_transformation (std::vector<coord>& coords) {
     for (int i = 0; i < coords.size(); i++) {
         double phi = std::get<0>(coords[i]);
         double rho = std::get<1>(coords[i]);
-        double x = rho * cos(phi);
+        double x = std::abs(rho * cos(phi));
         double y = rho * sin(phi);
         xOy.emplace_back(std::move(std::make_tuple(x, y, std::get<2>(coords[i]))));
     }
@@ -280,8 +306,6 @@ void default_distribution_plot (std::string& name, std::string& data, std::strin
         throw std::runtime_error ("Error opening pipe to GNUplot.");
     std::vector<std::string> stuff = {"set term svg",
                                       "set out \'" + PATH + name + ".svg\'",
-                                      "set xrange [-1:1]",
-                                      "set yrange [-1:1]",
                                       "set xlabel \'" + xlabel + "\'",
                                       "set ylabel \'" + ylabel + "\'",
                                       "set grid xtics ytics",
@@ -616,6 +640,7 @@ std::array<std::vector<coord>, N> interactions (std::vector<coord>& points) {
     double sigma_2_air_sum = sum_components(sigmas_air[sigmas_air.size()-1]);
     double x, y, z, alpha, E, sigma_sum, cos_ab;
     for (int i = 0; i < points.size(); i++) {
+        double h = (down_cyl_matter == "Pb") ? h_Pb : h_Al;
         interaction_points.at(i).emplace_back(points[i]);
         alpha = E_0 / E_e;
         std::string type;
@@ -648,7 +673,7 @@ std::array<std::vector<coord>, N> interactions (std::vector<coord>& points) {
                     coordinates_from_tuple(x_det, y_det, z_det, detectors[j]);
                     coord tau = vector_creation(A, detectors[j]);
                     double distance = abs_components(tau);
-                    if (z_det < 0.5) { // Just for born including.
+                    if (z_det < h) { // Just for born including.
                         double contribution = (density_estimation(W, std::get<0>(sigmas_air[sigmas_air.size() - 2]),
                                                                   std::get<0>(sigmas_air[sigmas_air.size() - 1]),
                                                                   number_of_energy_groups - 1, j, distance,
@@ -667,7 +692,8 @@ std::array<std::vector<coord>, N> interactions (std::vector<coord>& points) {
 }
 
 //The function plots the trajectories of particles. So it not fast, so you can comment it in main().
-void plot(std::array<std::vector<coord>, N>& points) {
+void plot(std::array<std::vector<coord>, N>& points, double R_cylinder) {
+    std::string R = std::to_string(R_cylinder);
     FILE *gp = popen("gnuplot  -persist", "w");
     if (!gp)
         throw std::runtime_error("Error opening pipe to GNUplot.");
@@ -676,19 +702,19 @@ void plot(std::array<std::vector<coord>, N>& points) {
             "set term pop",
             "set multiplot",
             "set grid xtics ytics ztics",
-            "set xrange [-1:1]",
-            "set yrange [-1:1]",
-            "set zrange [0:1]",
+            "set xrange [-35:35]",
+            "set yrange [-35:35]",
+            "set zrange [0:14]",
             "set key off",
             "set ticslevel 0",
             "set border 4095",
             "splot \'" + PATH + "detectors\' u 1:2:3 lw 3 lt rgb 'black'",
-            //"splot \'" + PATH + "cap\' u 1:2:3 w lines lw 2 lt rgb 'black'",
-            //"splot \'" + PATH + "cap\' u 1:2:3 w boxes lw 2 lt rgb 'black'",
             "set parametric",
             "set urange [0:2*pi]",
-            "set vrange [0:0.5]",
-            "splot cos(u),sin(u),v lw 1 lt rgb \'black\' title \'cylinder\'",
+            "set vrange [0:5]",
+            "splot " + R + "*cos(u)," + R + "*sin(u),v lw 1 lt rgb \'black\' title \'Pb-cylinder\'",
+            "set vrange [5:13]",
+            "splot " + R + "*cos(u)," + R + "*sin(u),v lw 1 lt rgb \'orange\' title \'Al-cylinder\'",
             "unset parametric",
             "splot '-' u 1:2:3 w lines"};
     for (const auto& it : stuff)
@@ -902,8 +928,8 @@ void detector_statistics_plot (std::string data, std::string& title) {
 
 //We have Energies for every particle and coordinates of intersection there.
 std::vector<std::vector<std::pair<int, double>>> flow_through_detector (std::array<std::vector<coord>, N>& interactions) {
-    std::vector<std::vector<std::pair<int, double>>> ans (detectors_number);
-    std::vector<std::vector<double>> eta_sum (detectors_number); //Consists sum for every group;
+    std::vector<std::vector<std::pair<int, double>>> ans (N);
+    std::vector<std::vector<double>> eta_sum (N); //Consists sum for every group;
     std::vector<int> number_of_contributed_particles;
     for (int i = 0; i < eta.size(); i++) {
         int contributed_particles = 0;
@@ -927,6 +953,14 @@ std::vector<std::vector<std::pair<int, double>>> flow_through_detector (std::arr
                   << sum / number_of_contributed_particles[i] << std::endl;
     }
     return ans;
+}
+
+//The shit above, but for detectors families
+std::vector<std::pair<double, double>> flux_distribution (std::vector<coord> detectors_family) {
+    for (int i = 0; i < detectors_family.size(); i++) {
+        double z = std::get<2>(detectors_family[i]);
+
+    }
 }
 
 void detector_plot (std::string data, std::string title) {

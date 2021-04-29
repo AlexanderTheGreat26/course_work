@@ -27,7 +27,7 @@
 #include <stdexcept>
 
 
-const int N = 1.0e4; //Number of points. //Do not use more than 0.5e4 on old computers!
+const int N = 1.0e1; //Number of points. //Do not use more than 0.5e4 on old computers!
 
 
 const double R_source = 20;
@@ -729,10 +729,8 @@ void plot(std::array<std::vector<coord>, N>& points, double R_cylinder) {
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < points[i].size(); j++) {
             coordinates_from_tuple(x, y, z, points[i][j]);
-            std::cout << x << '\t' << y << '\t' << z << std::endl;
             fprintf(gp, "%f\t%f\t%f\n", x, y, z);
         }
-        std::cout << std::endl;
         fprintf(gp, "%c\n%s\n", 'e', "splot '-' u 1:2:3 w lines");
     }
     fprintf(gp, "%c\n", 'q');

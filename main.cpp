@@ -28,7 +28,6 @@
 
 
 const int N = 1.0e4; //Number of points. //Do not use more than 0.5e4 on old computers!
-constexpr double dz = 1.0 / N;
 
 
 const double R_source = 20;
@@ -37,7 +36,9 @@ const double pi = 3.14159265359;
 
 const double h_Pb = 5;
 const double h_Al = 8;
-const std::string down_cyl_matter = "Pb"; //Define down environment;
+const std::string down_cyl_matter = "Al"; //Define down environment;
+const std::string up_cyl_matter = "Pb";
+const double down_cyl_height = (down_cyl_matter == "Pb") ? h_Pb : h_Al;
 
 
 double E_min = 1.0e5;
@@ -57,7 +58,9 @@ typedef std::tuple<double, double, double> coord;
 typedef std::tuple<double, double, double, double> longDoubleTuple;
 
 //There's a plane equation presented like Ax+By+Cz+D=0.
-const std::vector<longDoubleTuple> planes = {std::make_tuple(0, 0, 1, -0.5)};
+std::vector<longDoubleTuple> planes;
+
+void border_panes_creation (std::vector<longDoubleTuple>& borders);
 
 void data_file_creation (std::string DataType, std::vector<coord>& xx);
 
@@ -76,14 +79,14 @@ longDoubleTuple beam_direction (double sigma);
 
 coord coordinates_of_the_interaction (longDoubleTuple& beams);
 
-int energy_group(double& E);
+int energy_group (double& E);
 
 std::array<std::vector<coord>, N> interactions (std::vector<coord>& points);
 
 double cos_t (coord& A, coord& B, coord& C);
 
 
-void plot(std::array<std::vector<coord>, N>& points, double R);
+void plot (std::array<std::vector<coord>, N>& points, double R);
 
 std::vector<longDoubleTuple> database_read (std::string name);
 
@@ -91,7 +94,7 @@ double linear_interpolation (double& x_0, double& y_0, double& x_1, double& y_1,
 
 std::vector<std::tuple<double, double, double>> interpolated_database (std::vector<longDoubleTuple>& default_database);
 
-std::string exec(std::string str);
+std::string exec (std::string str);
 
 std::string PATH = exec("echo $PWD");
 
@@ -99,12 +102,11 @@ std::vector<std::tuple<double, double, double>> sigmas_air, sigmas_Al, sigmas_Pb
 
 std::tuple<double, double, double> interpolation_for_single_particle (int& group, double& E,
                                                                       std::vector<std::tuple<double, double, double>>& sigmas);
+std::vector<coord> detectors_definition ();
 
-std::vector<coord> detectors = {std::make_tuple(0, 0, 0.25),
-                                std::make_tuple(0, 0, 0.5),
-                                std::make_tuple(0, 0, 1.5)};
+std::vector<coord> detectors = std::move(detectors_definition());
 
-const int detectors_number = detectors.size();
+const int detectors_number = detectors.size(); //It's just a crunch, 'cause i don't sure that it will work with size() in this case.
 
 std::vector<std::vector<std::vector<double>>> eta (detectors_number);
 
@@ -135,13 +137,7 @@ std::vector <coord> polar ();
 std::vector <coord> coordinate_transformation (std::vector<coord>& coords);
 
 std::random_device rd;  //Will be used to obtain a seed for the random number engine
-std::mt19937 gen(rd()); //Standard mersenne_twister_engine seeded with rd()
-
-const std::vector<double> detectors_distance = {-R_sarcophagus, 0, 0.5*R_sarcophagus, R_sarcophagus};
-
-std::vector<std::vector<coord>> detectors_coordinates;
-
-std::vector<coord> detectors_generation (double r);
+std::mt19937 gen (rd ()); //Standard mersenne_twister_engine seeded with rd()
 
 int main() {
 
@@ -160,7 +156,7 @@ int main() {
     sigmas_Al = std::move(interpolated_database(Al_data));
     data_file_creation("Al", borders_of_groups, sigmas_Al);
 
-    std::vector<longDoubleTuple> Pb_data = std::move(database_read(PATH + "Al_sigmas_database"));
+    std::vector<longDoubleTuple> Pb_data = std::move(database_read(PATH + "Pb_sigmas_database"));
     sigmas_Pb = std::move(interpolated_database(air_data));
     data_file_creation("Pb", borders_of_groups, sigmas_Pb);
 
@@ -169,15 +165,11 @@ int main() {
 
     std::cout << "Computing..." << std::endl;
 
-    //Detectors generate
-    for (int i = 0; i < detectors_distance.size(); i++) {
-        std::vector<coord> detectors_family= std::move(detectors_generation(detectors_distance[i]));
-        detectors_coordinates.emplace_back(detectors_family);
-    }
     std::vector<coord> borning = std::move(polar());
     std::vector<coord> born_points = std::move(coordinate_transformation(borning));
     std::string name = "Distribution of " + std::to_string(N) + " points";
     data_file_creation(name, born_points);
+    border_panes_creation(planes);
     for (int i = 0; i < detectors_number; i++) //Did not allocate memory - died.
         eta[i].resize(number_of_energy_groups);
     std::array<std::vector<coord>, N> interaction_points = std::move(interactions(born_points));
@@ -204,7 +196,7 @@ int main() {
         double x, y, z;
         coordinates_from_tuple(x,y, z, detectors[i]);
         std::string title = "Detector inside the ";
-        title += (z <= 0.5) ? "air" : "Al";
+        title += (z <= down_cyl_height) ? down_cyl_matter : up_cyl_matter;
         detector_statistics_plot(names[i], title);
         detector_plot(names[i] + "_density", "Density flow through the " + title);
     }
@@ -215,13 +207,18 @@ int main() {
     return 0;
 }
 
+std::vector<coord> detectors_definition () {
+    std::vector<coord> det = {std::make_tuple(R_sarcophagus, 0, h_Al+h_Pb),
+                              std::make_tuple(-R_sarcophagus, 0, h_Al+h_Pb),
+                              std::make_tuple(R_sarcophagus, 0, 0),
+                              std::make_tuple(-R_sarcophagus, 0, 0)};
+    return det;
+}
 
-
-std::vector<coord> detectors_generation (double r) {
-    std::vector<coord> detector_coordinate (N);
-    double z = 0;
-    std::generate(detector_coordinate.begin(), detector_coordinate.end(), [&] {return std::make_tuple(r, 0, z += dz);});
-    return detector_coordinate;
+//The function bellow using for creating border_planes.
+void border_panes_creation (std::vector<longDoubleTuple>& borders) {
+    borders.emplace_back((down_cyl_matter == "Pb") ? std::make_tuple(0, 0, 1, -h_Pb) : std::make_tuple(0, 0, 1, -h_Al));
+    borders.emplace_back(std::make_tuple(0, 0, 1, -(h_Pb + h_Al)));
 }
 
 
@@ -304,8 +301,8 @@ void default_distribution_plot (std::string& name, std::string& data, std::strin
     FILE *gp = popen("gnuplot  -persist", "w");
     if (!gp)
         throw std::runtime_error ("Error opening pipe to GNUplot.");
-    std::vector<std::string> stuff = {"set term svg",
-                                      "set out \'" + PATH + name + ".svg\'",
+    std::vector<std::string> stuff = {"set term eps",
+                                      "set out \'" + PATH + name + ".eps\'",
                                       "set xlabel \'" + xlabel + "\'",
                                       "set ylabel \'" + ylabel + "\'",
                                       "set grid xtics ytics",
@@ -424,15 +421,17 @@ std::vector<double> quadratic_equation_solve (double& a, double& b, double& c) {
     double D = std::pow(b, 2) - 4*a*c;
     double t_1, t_2;
     if (D >= 0 && !std::isnan(D)) {
-        t_1 = (-b + std::sqrt(sqrt(D))) / 2 / a;
-        t_2 = (-b - std::sqrt(sqrt(D))) / 2 / a;
+        t_1 = (-b + std::sqrt(D)) / 2.0 / a;
+        t_2 = (-b - std::sqrt(D)) / 2.0 / a;
     } else
         t_1 = t_2 = 0;
     return {t_1, t_2};
 }
 
+
+//Rewrite this shit
 coord definition_of_intersection_points_cylinder (coord& initial_point, longDoubleTuple& beam) {
-    double x, x_init, y, y_init, z, z_init, cos_alpha, cos_beta, cos_gamma, A, B, C, D;
+    double x, x_init, y, y_init, z, z_init, cos_alpha, cos_beta, cos_gamma;
     cos_alpha = std::get<2>(beam);
     cos_beta = std::get<1>(beam);
     cos_gamma = std::get<0>(beam);
@@ -440,20 +439,20 @@ coord definition_of_intersection_points_cylinder (coord& initial_point, longDoub
     //a*t^2 + b*t + c == 0
     double a = std::pow(cos_alpha, 2) + std::pow(cos_beta, 2);
     double b = 2*(cos_alpha*x_init + cos_beta*y_init);
-    double c = std::pow(x_init, 2) + std::pow(y_init, 2) - 1;
+    double c = std::pow(x_init, 2) + std::pow(y_init, 2) - R_sarcophagus;
 
     std::vector<double> roots = std::move(quadratic_equation_solve(a, b, c));
-
     for (int i = 0; i < roots.size(); i++) {
-        x = x_init + roots[i]*cos_alpha;
-        y = y_init + roots[i]*cos_beta;
-        z = z_init + roots[i]*cos_gamma;
-        if (z > 0 && z <= 0.5) break;
+            x = x_init + roots[i] * cos_alpha;
+            y = y_init + roots[i] * cos_beta;
+            z = z_init + roots[i] * cos_gamma;
+            if (z > 0 && z <= down_cyl_height && z_init <= down_cyl_height ||
+            z >= down_cyl_height && z <= h_Al+h_Pb && z_init >= down_cyl_height) break;
     }
-    return (z > 0 && z <= 0.5) ? std::make_tuple(x, y, z) : initial_point;
+    return (z > 0 && z <= down_cyl_height && z_init <= down_cyl_height ||
+    z >= down_cyl_height && z <= h_Al+h_Pb && z_init >= down_cyl_height) ? std::make_tuple(x, y, z) : initial_point;
 }
 
-//First of all you need to analise is cos's and axes...
 coord definition_of_intersection_points_cap (coord& initial_point, longDoubleTuple& beam) {
     double x, x_init, y, y_init, z, z_init, cos_alpha, cos_beta, cos_gamma, A, B, C, D;
     cos_alpha = std::get<2>(beam);
@@ -476,9 +475,10 @@ coord definition_of_intersection_points_cap (coord& initial_point, longDoubleTup
         intersection_coordinate = std::move(solve(matrix, right_part));
         coordinates_from_tuple(x, y, z, intersection_coordinate);
         i++;
-    } while (i < planes.size() && !(std::pow(x, 2) + std::pow(y, 2) <= 1 && z > 0 && z <= 0.5)
-             || intersection_coordinate == initial_point);
-    if (intersection_coordinate == initial_point || !(std::pow(x, 2) + std::pow(y, 2) <= 1 && z > 0 && z <= 0.5))
+    } while (i < planes.size() && (std::pow(x, 2) + std::pow(y, 2) > R_sarcophagus ||
+            !(z > 0 && z <= down_cyl_height || z >= down_cyl_height && z <= h_Pb+h_Al) || intersection_coordinate == initial_point));
+    if (intersection_coordinate == initial_point || !(std::pow(x, 2) + std::pow(y, 2) <= R_sarcophagus
+    && !(z > 0 && z <= down_cyl_height || z >= down_cyl_height && z <= h_Pb+h_Al)))
         return initial_point;
     else
         return intersection_coordinate;
@@ -492,23 +492,23 @@ coord vector_creation (coord& A, coord& B) {
 }
 
 template<typename T, size_t... Is>
-auto scalar_prod_components_impl(T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
+auto scalar_prod_components_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
     return ((std::get<Is>(t) * std::get<Is>(t1)) + ...);
 }
 
 template <class Tuple>
-double scalar_prod_components(const Tuple& t, const Tuple& t1) {
+double scalar_prod_components (const Tuple& t, const Tuple& t1) {
     constexpr auto size = std::tuple_size<Tuple>{};
     return scalar_prod_components_impl(t, t1,  std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
 }
 
 template<typename T, size_t... Is>
-auto sum_components_impl(T const& t, std::index_sequence<Is...>) {
+auto sum_components_impl (T const& t, std::index_sequence<Is...>) {
     return (std::get<Is>(t) + ...);
 }
 
 template <class Tuple>
-double sum_components(const Tuple& t) {
+double sum_components (const Tuple& t) {
     constexpr auto size = std::tuple_size<Tuple>{};
     return sum_components_impl(t, std::make_index_sequence<size>{});
 }
@@ -532,25 +532,25 @@ coord definition_of_intersection_points (coord& initial_point, longDoubleTuple& 
  * If it interaction outside the sarcophagus functions returns the point of intersection with one of the planes,
  * otherwise it returns the interaction point in air. */
 coord definition_of_interaction_points (coord& initial_point, longDoubleTuple& direction) {
-    double x_init, y_init, z_init;
+    double x_init, y_init, z_init, x, y, z;
+    double error = 1.0e-15;
     coordinates_from_tuple(x_init, y_init, z_init, initial_point);
     coord intersection_point = definition_of_intersection_points(initial_point, direction);
     coord intersection_vector = vector_creation(initial_point, intersection_point);
     coord free_run_direction = coordinates_of_the_interaction(direction);
     coord free_run = vector_offset(initial_point, free_run_direction);
-    // Well, we have an error when try to compare two doubles.
-    // So we have to enter the amount of acceptable error.
-    double error = 1.0e-15;
-    if (std::pow(x_init, 2) + std::pow(y_init, 2) <= 1 && z_init >= 0 && z_init < 1)
+    coordinates_from_tuple(x, y, z, free_run);
+    if (std::pow(x_init, 2) + std::pow(y_init, 2) <= R_sarcophagus && (z_init >= 0 && z_init <= down_cyl_height ||
+        z_init >= down_cyl_height && z_init <= h_Al+h_Pb))
         if (abs_components(intersection_vector) < abs_components(free_run))
             return intersection_point;
         else
             return free_run;
     else
-    if (std::abs(abs_components(intersection_vector)) < error)
-        return free_run;
-    else
-        return intersection_point;
+        if (abs_components(intersection_vector) < error)
+            return free_run;
+        else
+            return intersection_point;
 }
 
 //Function returns the probability for types of interaction for environment (which defines with argument).
@@ -573,7 +573,7 @@ std::string interaction_type (std::vector<std::pair<double, std::string>>& p) {
 }
 
 //Function returns cos(a, b), where a, b -- vectors;
-double cos_t(coord& A, coord& B, coord& C) {
+double cos_t (coord& A, coord& B, coord& C) {
     coord a = std::move(vector_creation(A, B));
     coord b = std::move(vector_creation(B, C));
     return scalar_prod_components(a, b) / (abs_components(a) * abs_components(b));
@@ -593,13 +593,12 @@ double density_estimation (double& W, double sigma_0, double sigma_1, int group,
 }
 
 void flow_detection (double& sigma_sum, std::vector<std::pair<double, std::string>>& p, std::string& type,
-                     double& E, std::string environment, coord& particle_coordinate, double& W) {
+                     double& E, std::string environment, coord& particle_coordinate, double& W, double& h) {
+
+    //Well, we have to rewrite this function for all cases.
     int group = energy_group(E);
     std::vector<std::tuple<double, double, double>> sigma;
-    if (environment == "air")
-        sigma = sigmas_air;
-    else
-        sigma = sigmas_Al;
+    sigma = (environment == "air") ? sigmas_air : (environment == "Pb") ? sigmas_Pb : sigmas_Al;
     std::tuple<double, double, double> particle_sigma = (interpolation_for_single_particle(group, E, sigma));
     sigma_sum = sum_components(particle_sigma);
     p = statistical_weight(particle_sigma, sigma_sum);
@@ -611,18 +610,18 @@ void flow_detection (double& sigma_sum, std::vector<std::pair<double, std::strin
             coordinates_from_tuple(x_det, y_det, z_det, detectors[i]);
             coord tau = vector_creation(particle_coordinate, detectors[i]);
             double distance = abs_components(tau);
-            if (z_det <= h) { // We have to include particles only inside the box.
-                if (environment == "air") {
+            if (z_det <= down_cyl_height) {
+                if (environment == down_cyl_matter) {
                     groups_in_detector.at(i).emplace_back(group);
-                    double contribution = (density_estimation(W, std::get<0>(sigmas_air[group]), std::get<0>(sigmas_air[group+1]),
+                    double contribution = (density_estimation(W, std::get<0>(sigma[group]), std::get<0>(sigma[group+1]),
                                                               group, i, distance, particle_sigma));
                     particle_eta[i].emplace_back(std::make_pair(E, contribution));
                 }
             } else { // Only outside particles.
-                if (environment == "Al") {
+                if (environment == up_cyl_matter) {
                     if (E == E_0) continue;
                     groups_in_detector.at(i).emplace_back(group);
-                    double contribution = density_estimation(W, std::get<0>(sigmas_Al[group]), std::get<0>(sigmas_Al[group+1]),
+                    double contribution = density_estimation(W, std::get<0>(sigma[group]), std::get<0>(sigma[group+1]),
                                                              group, i, distance, particle_sigma);
                     particle_eta[i].emplace_back(std::make_pair(E, contribution));
                 }
@@ -640,7 +639,7 @@ std::array<std::vector<coord>, N> interactions (std::vector<coord>& points) {
     double sigma_2_air_sum = sum_components(sigmas_air[sigmas_air.size()-1]);
     double x, y, z, alpha, E, sigma_sum, cos_ab;
     for (int i = 0; i < points.size(); i++) {
-        double h = (down_cyl_matter == "Pb") ? h_Pb : h_Al;
+        double h = (down_cyl_matter == "Pb") ? h_Pb : h_Al; //We have to create an statement dor air!
         interaction_points.at(i).emplace_back(points[i]);
         alpha = E_0 / E_e;
         std::string type;
@@ -653,10 +652,12 @@ std::array<std::vector<coord>, N> interactions (std::vector<coord>& points) {
                 E = alpha * E_e;
                 Energy.emplace_back(E);
                 interaction_points.at(i).emplace_back(B);
-                if (std::abs(x) <= 1 && std::abs(y) <= 1 && z <= 1)
-                    flow_detection(sigma_sum, p_air, type, E, "air", B, W);
-                else
-                    flow_detection(sigma_sum, p_Al, type, E, "Al", B, W);
+                if (std::pow(x, 2) + std::pow(y, 2) <= R_sarcophagus && z >= 0 && z <= down_cyl_height)
+                    flow_detection(sigma_sum, p_air, type, E, down_cyl_matter, B, W, h);
+                else if (std::pow(x, 2) + std::pow(y, 2) <= R_sarcophagus && z >= down_cyl_height && z <= h_Pb+h_Al) {
+                    flow_detection(sigma_sum, p_Al, type, E, up_cyl_matter, B, W, h);
+                    } else
+                        flow_detection(sigma_sum, p_Al, type, E, "air", B, W, h);
                 direction = std::move(beam_direction(sigma_sum));
                 C = definition_of_interaction_points(B, direction);
                 coordinates_from_tuple(x, y, z, C);
@@ -674,10 +675,11 @@ std::array<std::vector<coord>, N> interactions (std::vector<coord>& points) {
                     coord tau = vector_creation(A, detectors[j]);
                     double distance = abs_components(tau);
                     if (z_det < h) { // Just for born including.
-                        double contribution = (density_estimation(W, std::get<0>(sigmas_air[sigmas_air.size() - 2]),
-                                                                  std::get<0>(sigmas_air[sigmas_air.size() - 1]),
+                        sigmas = (down_cyl_matter == "Pb") ? sigmas_Pb : sigmas_Al;
+                        double contribution = (density_estimation(W, std::get<0>(sigmas[sigmas.size() - 2]),
+                                                                  std::get<0>(sigmas[sigmas.size() - 1]),
                                                                   number_of_energy_groups - 1, j, distance,
-                                                                  sigmas_air[sigmas_air.size() - 1]));
+                                                                  sigmas[sigmas.size() - 1]));
                         particle_eta[j].emplace_back(std::make_pair(E_0, contribution));
                     }
                 }
@@ -685,46 +687,52 @@ std::array<std::vector<coord>, N> interactions (std::vector<coord>& points) {
             }
             if (std::isnan(alpha)) break;
             coordinates_from_tuple(x, y, z, B);
+            std::cout << std::endl;
         } while (type.empty() == 1 || type == "Compton" && E > E_min);
         Energies.at(i) = Energy;
+        std::cout << std::endl;
     }
+
     return interaction_points;
 }
 
 //The function plots the trajectories of particles. So it not fast, so you can comment it in main().
 void plot(std::array<std::vector<coord>, N>& points, double R_cylinder) {
     std::string R = std::to_string(R_cylinder);
+    std::string height = std::to_string(down_cyl_height);
     FILE *gp = popen("gnuplot  -persist", "w");
     if (!gp)
         throw std::runtime_error("Error opening pipe to GNUplot.");
-    std::vector<std::string> stuff = {//"set term pdf",
-            //"set output \'" + PATH + "Hedgehog.pdf\'",
-            "set term pop",
-            "set multiplot",
-            "set grid xtics ytics ztics",
-            "set xrange [-35:35]",
-            "set yrange [-35:35]",
-            "set zrange [0:14]",
-            "set key off",
-            "set ticslevel 0",
-            "set border 4095",
-            "splot \'" + PATH + "detectors\' u 1:2:3 lw 3 lt rgb 'black'",
-            "set parametric",
-            "set urange [0:2*pi]",
-            "set vrange [0:5]",
-            "splot " + R + "*cos(u)," + R + "*sin(u),v lw 1 lt rgb \'black\' title \'Pb-cylinder\'",
-            "set vrange [5:13]",
-            "splot " + R + "*cos(u)," + R + "*sin(u),v lw 1 lt rgb \'orange\' title \'Al-cylinder\'",
-            "unset parametric",
-            "splot '-' u 1:2:3 w lines"};
+    std::vector<std::string> stuff = {"set term pdf",
+                                      "set output \'" + PATH + "Hedgehog" + down_cyl_matter + ".pdf\'",
+                                      //"set term pop",
+                                      "set multiplot",
+                                      "set grid xtics ytics ztics",
+                                      "set xrange [-35:35]",
+                                      "set yrange [-35:35]",
+                                      "set zrange [0:14]",
+                                      "set key off",
+                                      "set ticslevel 0",
+                                      "set border 4095",
+                                      "splot \'" + PATH + "detectors\' u 1:2:3 lw 3 lt rgb 'black'",
+                                      "set parametric",
+                                      "set urange [0:2*pi]",
+                                      "set vrange [0:" + height + "]",
+                                      "splot " + R + "*cos(u)," + R + "*sin(u),v lw 1 lt rgb \'black\' title \'Pb-cylinder\'",
+                                      "set vrange [" + height + ":13]",
+                                      "splot " + R + "*cos(u)," + R + "*sin(u),v lw 1 lt rgb \'orange\' title \'Al-cylinder\'",
+                                      "unset parametric",
+                                      "splot '-' u 1:2:3 w lines"};
     for (const auto& it : stuff)
         fprintf(gp, "%s\n", it.c_str());
     double x, y, z;
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < points[i].size(); j++) {
             coordinates_from_tuple(x, y, z, points[i][j]);
+            std::cout << x << '\t' << y << '\t' << z << std::endl;
             fprintf(gp, "%f\t%f\t%f\n", x, y, z);
         }
+        std::cout << std::endl;
         fprintf(gp, "%c\n%s\n", 'e', "splot '-' u 1:2:3 w lines");
     }
     fprintf(gp, "%c\n", 'q');
@@ -735,7 +743,7 @@ void plot(std::array<std::vector<coord>, N>& points, double R_cylinder) {
 //Function return the number of energy group for particle.
 int energy_group(double& E) {
     for (int i = borders_of_groups.size() - 1; i > 0; i--)
-        if (E >= borders_of_groups[i - 1] && E <= borders_of_groups[i])
+        if (E >= borders_of_groups[i-1] && E <= borders_of_groups[i])
             return i - 1;
 }
 
@@ -828,7 +836,7 @@ void interpolation_plot(std::string matter, std::vector<double>& E,
     FILE *gp = popen("gnuplot  -persist", "w");
     if (!gp)
         throw std::runtime_error("Error opening pipe to GNUplot.");
-    std::vector<std::string> stuff = {"set term svg",
+    std::vector<std::string> stuff = {"set term ",
                                       "set out \'" + PATH + "Photon Cross Sections for " + matter + ".svg\'",
                                       "set grid xtics ytics",
                                       "set title \'Photon Cross Sections for " + matter + "\'",
@@ -913,7 +921,7 @@ void detector_statistics_plot (std::string data, std::string& title) {
                                       "set xlabel \'Number of group\'",
                                       "set ylabel \'Contributed particles count\'",
                                       "set title \'" + title + "\'",
-            //"set yrange [0:" + std::to_string(N) + "]",
+                                    //"set yrange [0:" + std::to_string(N) + "]",
                                       "set xrange [0:" + std::to_string(number_of_energy_groups) + "]",
                                       "set boxwidth 0.5",
                                       "set style fill solid",
@@ -953,14 +961,6 @@ std::vector<std::vector<std::pair<int, double>>> flow_through_detector (std::arr
                   << sum / number_of_contributed_particles[i] << std::endl;
     }
     return ans;
-}
-
-//The shit above, but for detectors families
-std::vector<std::pair<double, double>> flux_distribution (std::vector<coord> detectors_family) {
-    for (int i = 0; i < detectors_family.size(); i++) {
-        double z = std::get<2>(detectors_family[i]);
-
-    }
 }
 
 void detector_plot (std::string data, std::string title) {
